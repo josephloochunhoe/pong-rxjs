@@ -1,0 +1,59 @@
+<html>
+    <head>
+        <style>
+            @import url(style.css);
+            p.highlight {
+                color: red;
+            }
+            svg {
+                background-color: rgb(41, 41, 36);
+            }
+        </style>
+        <script src="./dist/pong.js"></script>
+    </head>
+    <body>
+        <h1>Pong</h1>
+        <svg id="canvas" width="600" height="600">
+            <style>
+                .score { font: 90px Consolas; fill: white; }
+                .paddle { fill: white; stroke:white }
+                .ball { fill: white; stroke:white }
+
+                .arrowkey {
+                    width:18px;
+                    text-align:center;
+                    border-radius:3px;
+                    background-color:lightgray;
+                }
+                .highlight {
+                    background-color:pink;
+                }
+            </style>
+            
+            <!--White dashed line in the middle of canvas-->
+            <g fill="none" stroke=white stroke-width="7">
+                <path stroke-dasharray="10,10" d="M300 50 L300 550" />
+            </g>
+
+            <!--Paddles-->
+            <rect class="paddle" id="player_paddle" width="7" height="30" x="50" y="285"/>
+            <rect class="paddle" id="enemy_paddle" width="7" height="30" x="543" y="285"/>
+
+            <!--Scoreboard-->
+            <text class="score" id="player_score" x="115" y="95">0</text>
+            <text class="score" id="enemy_score"  x="430" y="95">0</text>
+
+            <!--Ball-->
+            <rect class="ball" id="ball" width="7" height="7" x="300" y="300"/>
+        </svg>
+        
+        <div id="controls">
+            <h2>Controls:</h2>
+            <table>
+                <tr><td>Move Up: </td><td><div id="ArrowUp" class="arrowkey">&#8679;</div></td></tr>
+                <tr><td>Move Down: </td><td><div id="ArrowDown" class="arrowkey">&#8681;</div></td></tr>
+                <!--<tr><td>Restart Game</td><td>F5</td></tr> -->
+            </table>
+        </div>
+    </body>
+</html>
