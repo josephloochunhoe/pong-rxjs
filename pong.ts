@@ -44,6 +44,7 @@ function pong() {
 		viewType: ViewType,
 		width: number,
 		height: number,
+		prev_pos: Vec,
 		pos: Vec, 
 		vel: Vec,
 		acc: Vec,
@@ -71,12 +72,25 @@ function pong() {
 			viewType: viewType,
 			width: width,
 			height: height,
+			prev_pos: Vec.Zero,
 			pos: pos, 
 			vel: vel,
 			angle: angle
 		},
 		// Give the ball a random angle to move at when a new round has started
-		randomAngle = (): number => { return Math.random() * 359 }
+		randomAngle = (): number => { 
+			if (Math.random() < 0.5) {
+				if (Math.random() < 0.5) {
+					return 25
+				}
+				return 155
+			} else {
+				if (Math.random() < 0.5) {
+					return 205
+				}
+				return 335
+			}
+		}
 
 	const
 		player = createRectangle ('player') ('paddle') 
@@ -109,11 +123,11 @@ function pong() {
 		moveObj = (o: Body): Body => {
 			const 
 				updatedPos = o.pos.add(o.vel),
-				outOfBounds = updatedPos.y === 0 || updatedPos.y + (o.viewType === 'paddle' ? Constants.PaddleHeight : Constants.BallSize) === Constants.CanvasSize
+				outOfBounds = updatedPos.y <= 0 || updatedPos.y + (o.viewType === 'paddle' ? Constants.PaddleHeight : Constants.BallSize) >= Constants.CanvasSize
 		return <Body>{
 			...o,
+			prev_pos: o.pos,
 			pos: outOfBounds ? o.pos : updatedPos
-			// pos: o.pos.add(o.vel)
 		}},
 		handleCollisions = (s: State) => {
 			const
@@ -121,21 +135,32 @@ function pong() {
 													   (a.pos.x <= b.pos.x + b.width) &&
 													   (a.pos.y + a.height >= b.pos.y) && 
 													   (a.pos.y <= b.pos.y + b.height),
-				paddleCollideWall = (a: Body) => { if (a.pos.y < 0 || a.pos.y + Constants.PaddleHeight > Constants.CanvasSize){
-														
-													} 
-												},
 				ballCollidePlayer = bodiesCollided(s.player, s.ball),
-				ballCollideEnemy = bodiesCollided(s.enemy, s.ball),
+				ballCollideEnemy = bodiesCollided(s.ball, s.enemy),
+				ballCollideWall = s.ball.pos.y <= 3 || s.ball.pos.y + Constants.BallSize >= Constants.CanvasSize - 3,
 
-				playerCollideWall = paddleCollideWall(s.player),
-				enemyCollideWall = paddleCollideWall(s.enemy),
+				ballReboundPaddle = (ball: Body, paddle: Body): Body => { 
+					const
+						comingFromTop = s.ball.prev_pos.y < s.ball.pos.y,
+						opppositeVelocity = Vec.unitVecInDirection(180+ball.angle).scale(Constants.BallVelocity),
+						reboundVelocity = Vec.unitVecInDirection(180-ball.angle).scale(Constants.BallVelocity)
 
-				ballCollideWall = s.ball.pos.y === 0 || s.ball.pos.y + Constants.BallSize === Constants.CanvasSize,
-				ballReboundPaddle = (ball: Body, paddle: Body): Body => 
-														{return ball.pos.y + (Constants.BallSize/2) <= paddle.pos.y + (Constants.PaddleHeight/2) ? 
-															<Body>{...ball, vel: ball.vel.scale(-1)} : // Top half of paddle: the ball moves backwards to previous direction
-															<Body>{...ball, vel: ball.vel.ortho()}}, // Bottom half of paddle: the ball moves orthogonal to previous direction
+						// Ball coming from TOP and hit TOP half of paddle: the ball moves backwards to previous direction
+						// Ball coming from TOP and hit BOTTOM half of paddle: the ball moves rebounds normally
+						// Ball coming from BOTTOM and hit TOP half of paddle: the ball moves rebounds normally
+						// Ball coming from BOTTOM and hit BOTTOM half of paddle: the ball moves backwards to previous direction
+						return ball.pos.y + (Constants.BallSize/2) <= paddle.pos.y + (Constants.PaddleHeight/2) ? 
+						<Body>{...ball, vel: comingFromTop ? opppositeVelocity : reboundVelocity, angle: comingFromTop ? 180+ball.angle : 180-ball.angle} :
+						<Body>{...ball, vel: comingFromTop ? reboundVelocity : opppositeVelocity, angle: comingFromTop ? 180-ball.angle : 180+ball.angle}},
+
+				ballReboundWall = (ball: Body): Body => {
+					const 
+						reboundVelocity = Vec.unitVecInDirection(180-ball.angle).scale(Constants.BallVelocity)
+					
+					return ball.prev_pos.x <= ball.pos.x ? <Body>{...ball, prev_pos: ball.pos, pos: ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: 180-ball.angle} :
+														   <Body>{...ball, prev_pos: ball.pos, pos: ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: 180-ball.angle}
+					
+				},
 
 				ballRebound = (s: State): Body => 
 											{return ballCollidePlayer ? 
@@ -143,11 +168,11 @@ function pong() {
 											ballCollideEnemy ? 
 												ballReboundPaddle(s.ball, s.enemy) :
 											ballCollideWall ? 
-												<Body>{...s.ball, vel: Vec.unitVecInDirection(180-s.ball.angle).scale(Constants.BallVelocity), angle: 180-s.ball.angle} : 
+												ballReboundWall(s.ball) : 
 											<Body>{...s.ball}},  // Return the ball at the same state if no collision
 
-				newBallState = ballRebound(s)
-
+			newBallState = ballRebound(s)
+			console.log(s.ball.pos)
 			return <State>{
 				...s,
 				ball: newBallState
@@ -155,8 +180,8 @@ function pong() {
 		},
 		handleScoring = (s: State): State => {
 			const
-				enemyScored = s.ball.pos.x < 0,
-				playerScored = s.ball.pos.x > Constants.CanvasSize,
+				enemyScored = s.ball.pos.x < 10,
+				playerScored = s.ball.pos.x > Constants.CanvasSize-10,
 				playerWon = playerScored ? s.playerScore + 1 === Constants.MaxScore : false,
 				enemyWon = enemyScored ? s.enemyScore + 1 === Constants.MaxScore : false
 			
@@ -167,16 +192,22 @@ function pong() {
 																	 enemyScore: s.enemyScore + 1, gameOver: enemyWon} : 
 								  <State>{...s}
 		},
+		handleEnemyMovement = (s: State): State => {
+			const
+				ballYVelocity = s.ball.vel.y
+			return {...s, enemy: {...s.enemy, vel: new Vec(0, ballYVelocity).scale(0.8)}}
+		},
 		tick = (s: State, elapsed: number) => {
-			return handleScoring(handleCollisions(
+			return handleScoring(handleCollisions(handleEnemyMovement(
 				{
 					...s, 
 					time: elapsed,
 					player: moveObj(s.player),
+					// enemy: moveObj(handleEnemyMovement(s)),
 					enemy: moveObj(s.enemy),
 					ball: moveObj(s.ball)
 				}
-			))
+			)))
 		},
 		reduceState = (s: State, e: Move | Tick): State => 
 			e instanceof Move ? {...s,
