@@ -21,24 +21,23 @@ type Event = 'keyup' | 'keydown'
 type ViewType = 'paddle' | 'ball'
 type Role = 'player' | 'enemy' | 'ball'
 
+// This code is heavily inspired by the code from https://tgdwyer.github.io/asteroids/. 
 function pong() {
-    // This code is heavily inspired by the code from https://tgdwyer.github.io/asteroids/. 
-
 	class Tick { constructor(public readonly elapsed: number) {} }
-	class Move { constructor(public readonly direction: Key) {} }
+	class Move { constructor(public readonly direction: number) {} }
 	
 	const 
-		keyObservable = <T>(e: Event, k: Key, result: () => T) =>
-    	fromEvent<KeyboardEvent>(document, e).pipe(
-			filter(({code}) => code === k),
+		keyObservable = <T>(event: Event, keyCode: Key, result: () => T) =>
+    	fromEvent<KeyboardEvent>(document, event).pipe(
+			filter(({code}) => code === keyCode),
 			filter(({repeat}) => !repeat),
 			map(result)
 		),
 
-		startUp = keyObservable('keydown', 'ArrowUp', () => new Move("ArrowUp")),
-		stopUp = keyObservable('keyup', 'ArrowUp', () => new Move("ArrowUp")), 
-		startDown = keyObservable('keydown', 'ArrowDown', () => new Move("ArrowDown")),
-		stopDown = keyObservable('keyup', 'ArrowDown', () => new Move("ArrowDown"))
+		startUp = keyObservable('keydown', 'ArrowUp', () => new Move(-1)),
+		stopUp = keyObservable('keyup', 'ArrowUp', () => new Move(0)), 
+		startDown = keyObservable('keydown', 'ArrowDown', () => new Move(1)),
+		stopDown = keyObservable('keyup', 'ArrowDown', () => new Move(0))
 	
 	type Body = Readonly<{
 		id: string,
@@ -58,7 +57,7 @@ function pong() {
 		ball: Body,
 		playerScore: number,
 		enemyScore: number,
-		exit: ReadonlyArray<Body>,
+		scored: boolean,
 		gameOver: boolean
 	}>
 
@@ -66,7 +65,7 @@ function pong() {
 		createRectangle = (id: Role) => (viewType: ViewType) => 
 						  (width: number) => (height: number) => 
 						  (pos: Vec) => 
-						  (vel: Vec) => (acc: Vec) => 
+						  (vel: Vec) => (angle: number) =>
 		<Body>{
 			id: id,
 			viewType: viewType,
@@ -74,26 +73,27 @@ function pong() {
 			height: height,
 			pos: pos, 
 			vel: vel,
-			acc: acc,
-			angle: 0
-		}
+			angle: angle
+		},
+		// Give the ball a random angle to move at when a new round has started
+		randomAngle = (): number => { return Math.random() * 359 }
 
 	const
 		player = createRectangle ('player') ('paddle') 
 								 (Constants.PaddleWidth) (Constants.PaddleHeight) 
 								 (new Vec(Constants.PaddleXPosition, Constants.PaddleYPosition)) 
-								 (Vec.Zero) (Vec.Zero),
+								 (Vec.Zero) (0),
 
 		enemy = createRectangle ('enemy') ('paddle') 
 								(Constants.PaddleWidth) (Constants.PaddleHeight) 
 								(new Vec(Constants.CanvasSize - Constants.PaddleXPosition - Constants.PaddleWidth, Constants.PaddleYPosition)) 
-								(new Vec(0, -Constants.PaddleVelocity)) (Vec.Zero),
+								(Vec.Zero) (0),
 
+		angle = randomAngle(),
 		startBall = createRectangle('ball') ('ball') 
 								   (Constants.BallSize) (Constants.BallSize) 
 								   (new Vec(Constants.CanvasSize / 2, Constants.CanvasSize / 2)) 
-								   (new Vec(Math.random() * 2 - 1, Math.random() * 2 - 1).scale(Constants.BallVelocity)) (Vec.Zero),
-								//    (new Vec(0, -Constants.BallVelocity)) (Vec.Zero),
+								   (Vec.unitVecInDirection(angle).scale(Constants.BallVelocity)) (angle),
 
 		initialState: State = {
 			time: 0,
@@ -102,18 +102,18 @@ function pong() {
 			ball: startBall,
 			playerScore: 0,
 			enemyScore: 0,
-			exit: [],
+			scored: false,
 			gameOver: false
 		},
 		
 		moveObj = (o: Body): Body => {
-			// const 
-			// 	updatedPos = o.pos.add(o.vel),
-			// 	outOfBounds = updatedPos.y <= 0 || updatedPos.y >= Constants.CanvasSize
+			const 
+				updatedPos = o.pos.add(o.vel),
+				outOfBounds = updatedPos.y === 0 || updatedPos.y + (o.viewType === 'paddle' ? Constants.PaddleHeight : Constants.BallSize) === Constants.CanvasSize
 		return <Body>{
 			...o,
-			// pos: outOfBounds ? o.pos : updatedPos
-			pos: o.pos.add(o.vel)
+			pos: outOfBounds ? o.pos : updatedPos
+			// pos: o.pos.add(o.vel)
 		}},
 		handleCollisions = (s: State) => {
 			const
@@ -121,11 +121,19 @@ function pong() {
 													   (a.pos.x <= b.pos.x + b.width) &&
 													   (a.pos.y + a.height >= b.pos.y) && 
 													   (a.pos.y <= b.pos.y + b.height),
-				ballCollidePlayer = bodiesCollided(s.ball, s.player),
+				paddleCollideWall = (a: Body) => { if (a.pos.y < 0 || a.pos.y + Constants.PaddleHeight > Constants.CanvasSize){
+														
+													} 
+												},
+				ballCollidePlayer = bodiesCollided(s.player, s.ball),
 				ballCollideEnemy = bodiesCollided(s.enemy, s.ball),
-				ballCollideWall = s.ball.pos.y <= 0 || s.ball.pos.y >= Constants.CanvasSize,
+
+				playerCollideWall = paddleCollideWall(s.player),
+				enemyCollideWall = paddleCollideWall(s.enemy),
+
+				ballCollideWall = s.ball.pos.y === 0 || s.ball.pos.y + Constants.BallSize === Constants.CanvasSize,
 				ballReboundPaddle = (ball: Body, paddle: Body): Body => 
-														{return ball.pos.y <= paddle.pos.y + (Constants.PaddleHeight/2) ? 
+														{return ball.pos.y + (Constants.BallSize/2) <= paddle.pos.y + (Constants.PaddleHeight/2) ? 
 															<Body>{...ball, vel: ball.vel.scale(-1)} : // Top half of paddle: the ball moves backwards to previous direction
 															<Body>{...ball, vel: ball.vel.ortho()}}, // Bottom half of paddle: the ball moves orthogonal to previous direction
 
@@ -135,7 +143,7 @@ function pong() {
 											ballCollideEnemy ? 
 												ballReboundPaddle(s.ball, s.enemy) :
 											ballCollideWall ? 
-												<Body>{...s.ball, vel: s.ball.vel.ortho()} : 
+												<Body>{...s.ball, vel: Vec.unitVecInDirection(180-s.ball.angle).scale(Constants.BallVelocity), angle: 180-s.ball.angle} : 
 											<Body>{...s.ball}},  // Return the ball at the same state if no collision
 
 				newBallState = ballRebound(s)
@@ -149,11 +157,14 @@ function pong() {
 			const
 				enemyScored = s.ball.pos.x < 0,
 				playerScored = s.ball.pos.x > Constants.CanvasSize,
-				playerWon = playerScored ? s.playerScore + 1 > Constants.MaxScore : false,
-				enemyWon = enemyScored ? s.enemyScore + 1 > Constants.MaxScore : false
-
-			return playerScored ? <State>{...s, playerScore: s.playerScore + 1, exit: s.exit.concat(s.ball), gameOver: playerWon} : 
-					enemyScored ? <State>{...s, enemyScore: s.enemyScore + 1, exit: s.exit.concat(s.ball), gameOver: enemyWon} : 
+				playerWon = playerScored ? s.playerScore + 1 === Constants.MaxScore : false,
+				enemyWon = enemyScored ? s.enemyScore + 1 === Constants.MaxScore : false
+			
+			// When someone scores, the ball needs to be reset in original position for new round
+			return playerScored ? <State>{...s, ball: {...startBall, vel: Vec.unitVecInDirection(randomAngle()).scale(Constants.BallVelocity)}, 
+																	 playerScore: s.playerScore + 1, gameOver: playerWon} : 
+					enemyScored ? <State>{...s, ball: {...startBall, vel: Vec.unitVecInDirection(randomAngle()).scale(Constants.BallVelocity)}, 
+																	 enemyScore: s.enemyScore + 1, gameOver: enemyWon} : 
 								  <State>{...s}
 		},
 		tick = (s: State, elapsed: number) => {
@@ -161,15 +172,15 @@ function pong() {
 				{
 					...s, 
 					time: elapsed,
+					player: moveObj(s.player),
 					enemy: moveObj(s.enemy),
 					ball: moveObj(s.ball)
 				}
 			))
 		},
-		reduceState = (s: State, e: Move | Tick) => 
+		reduceState = (s: State, e: Move | Tick): State => 
 			e instanceof Move ? {...s,
-				player: {...s.player, vel: e.direction === 'ArrowUp' ? new Vec (0, Constants.PaddleVelocity).scale(-1) 
-																	 : new Vec (0, Constants.PaddleVelocity)}
+				player: {...s.player, vel: new Vec (0, e.direction).scale(Constants.PaddleVelocity)}
 			} :
 			tick(s, e.elapsed)
 		
@@ -186,48 +197,43 @@ function pong() {
 			enemy = document.getElementById("enemy_paddle")!,
 			player_score = document.getElementById("player_score")!,
 			enemy_score = document.getElementById("enemy_score")!,
-			attr = (e: Element, o: any) =>
-				{ for(const k in o) e.setAttribute(k, String(o[k])) },
 			updateBallView = (b:Body) => {
-				const createBallView = () => {
-					const v = document.createElementNS(svg.namespaceURI, "rect")!
-					attr(v, {id: b.id, x: Constants.CanvasSize / 2, y: Constants.CanvasSize / 2})
-					v.classList.add(b.viewType)
-					svg.appendChild(v)
-					return v
-				}
-				const v = document.getElementById(b.id) || createBallView();
-				attr(v, {x: b.pos.x, y: b.pos.y})
+				const v = document.getElementById(b.id)
+				v.setAttribute('x', String(b.pos.x))
+				v.setAttribute('y', String(b.pos.y))
 			};
 		
 		// Update each of the UI elements to the new values
 		// Update the movement of the paddles
-		attr(player, {y:`${s.player.pos.y}`})
-		attr(enemy, {y:`${s.enemy.pos.y}`})
+		player.setAttribute('y', String(s.player.pos.y))
+		enemy.setAttribute('y', String(s.enemy.pos.y))
 		
-		// Remove the ball that has been scored
-		s.exit.map(o => document.getElementById(o.id))
-				.filter(isNotNullOrUndefined)
-				.forEach(v => svg.removeChild(v))
 		
-		// Add the ball for next round or update the ball's position if still in play
+		// Update the ball's position if still in play
 		updateBallView(s.ball)
 
 		// Update the score if any players has scored
 		player_score.textContent = String(s.playerScore)
 		enemy_score.textContent = String(s.enemyScore)
 
-
+		// This means either player or enemy has scored 7 points. 
+		// The observable stream will be unsubscribed and a message stating who won would be displayed
 		if (s.gameOver) {
 			subscription.unsubscribe()
 			const v = document.createElementNS(svg.namespaceURI, "text")!
-			attr(v, {x: Constants.CanvasSize/6, y: Constants.CanvasSize/2, class: "end_message"})
-			s.playerScore > 7 ? v.textContent = "Player Won": v.textContent = "Computer Won"
+
+			// Different x so as to align end mesaage properly as one is longer than the other
+			s.playerScore == Constants.MaxScore ? v.setAttribute('x', String(Constants.CanvasSize/4)) : v.setAttribute('x', String(Constants.CanvasSize/6))
+			v.setAttribute('y', String(Constants.CanvasSize/2))
+			v.setAttribute('class', "end_message")
+			s.playerScore === Constants.MaxScore ? v.textContent = "Player Won" : v.textContent = "Computer Won"
 			svg.appendChild(v)
 		}
 	}
 }
 
+// This function is for the 'Control' section of the game where the control buttons will be highlighted pink if a button is clicked in real time.
+// It is meant to friendly to the user so they can easily tell which button is meant for which functionality in the game
 function showKeys() {
 	function showKey(keyCode: Key) {
 		const 
@@ -251,6 +257,9 @@ if (typeof window != 'undefined')
 		showKeys();
 	}	
 
+
+// This class was taken directly from https://tgdwyer.github.io/asteroids/.
+// This class simulates the movements of all elements in this game such as the position of the elements and the velocity. 
 class Vec {
 	constructor(public readonly x: number = 0, public readonly y: number = 0) {}
 	add = (b:Vec) => new Vec(this.x + b.x, this.y + b.y)
@@ -264,20 +273,9 @@ class Vec {
               )(Math.cos(rad), Math.sin(rad), this)
             )(Math.PI * deg / 180)
 
-  static unitVecInDirection = (deg: number) => new Vec(0,-1).rotate(deg)
-	
+	static unitVecInDirection = (deg: number) => new Vec(0,-1).rotate(deg)	
 	static Zero = new Vec();
 }
-  
-/**
- * Type guard for use in filters
- * @param input something that might be null or undefined
- */
-function isNotNullOrUndefined<T extends Object>(input: null | undefined | T): input is T {
-	return input != null;
-  }
-
-  
 	// createBall = ():Body => {
 	// 	return {
 	// 		id: 'ball',

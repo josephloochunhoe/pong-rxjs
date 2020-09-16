@@ -15,9 +15,23 @@
         <h1>Pong</h1>
         <svg id="canvas" width="600" height="600">
             <style>
-                .score { font: 90px Consolas; fill: white; }
-                .paddle { fill: white; stroke:white }
-                .ball { fill: white; stroke:white }
+                .score { 
+                    font: 90px Consolas; 
+                    fill: white; 
+                }
+                .paddle { 
+                    fill: white; 
+                    stroke:white 
+                }
+                .ball { 
+                    fill: white; 
+                    stroke:white 
+                }
+                .end_message {
+                    font-family:Consolas; 
+                    font-size:60px; 
+                    fill:white;
+                }
 
                 .arrowkey {
                     width:18px;
@@ -32,7 +46,7 @@
             
             <!--White dashed line in the middle of canvas-->
             <g fill="none" stroke=white stroke-width="7">
-                <path stroke-dasharray="10,10" d="M300 50 L300 550" />
+                <path stroke-dasharray="10,10" d="M300 25 L300 575" />
             </g>
 
             <!--Paddles-->
