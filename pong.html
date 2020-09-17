@@ -50,15 +50,15 @@
             </g>
 
             <!--Paddles-->
-            <rect class="paddle" id="player_paddle" width="7" height="30" x="50" y="285"/>
-            <rect class="paddle" id="enemy_paddle" width="7" height="30" x="543" y="285"/>
+            <rect class="paddle" id="player_paddle" width="7" height="40" x="50" y="280"/>
+            <rect class="paddle" id="enemy_paddle" width="7" height="40" x="543" y="280"/>
 
             <!--Scoreboard-->
             <text class="score" id="player_score" x="115" y="95">0</text>
             <text class="score" id="enemy_score"  x="430" y="95">0</text>
 
             <!--Ball-->
-            <rect class="ball" id="ball" width="7" height="7" x="300" y="300"/>
+            <rect class="ball" id="ball" width="8" height="8" x="292" y="292"/>
         </svg>
         
         <div id="controls">
@@ -66,8 +66,10 @@
             <table>
                 <tr><td>Move Up: </td><td><div id="ArrowUp" class="arrowkey">&#8679;</div></td></tr>
                 <tr><td>Move Down: </td><td><div id="ArrowDown" class="arrowkey">&#8681;</div></td></tr>
-                <!--<tr><td>Restart Game</td><td>F5</td></tr> -->
             </table>
+            <p>Note:</p>
+            <p>1. There is a 1 second delay after a player has scored</p>
+            <p>2. After someone has won, the game will restart in 3 seconds</p>
         </div>
     </body>
 </html>

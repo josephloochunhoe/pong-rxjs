@@ -1,18 +1,18 @@
 import { interval, fromEvent, from, zip } from 'rxjs'
-import { map, scan, filter, merge, flatMap, takeUntil, take, concat} from 'rxjs/operators'
+import { map, scan, filter, merge, flatMap, takeUntil, take, concat, timeInterval} from 'rxjs/operators'
 
 const
 	Constants = new class {
 		readonly CanvasSize = 600
 		readonly PaddleXPosition = 50
-		readonly PaddleYPosition = 285
+		readonly PaddleYPosition = 280
 		readonly PaddleWidth = 7
-		readonly PaddleHeight = 30
+		readonly PaddleHeight = 40
 		readonly PaddleVelocity = 3
-		// readonly PaddleAcc = 1
-		// readonly BallRadius = 4
-		readonly BallSize = 7
-		readonly BallVelocity = 3
+		readonly BallSize = 8
+		readonly BallVelocity = 4
+		readonly BallStartAngle = 30
+		readonly NextBallAngle = 90
 		readonly MaxScore = 7
 	}
 
@@ -47,7 +47,6 @@ function pong() {
 		prev_pos: Vec,
 		pos: Vec, 
 		vel: Vec,
-		acc: Vec,
 		angle: number
 	}>
 
@@ -58,7 +57,8 @@ function pong() {
 		ball: Body,
 		playerScore: number,
 		enemyScore: number,
-		scored: boolean,
+		round: number,
+		restart_at: number,
 		gameOver: boolean
 	}>
 
@@ -76,20 +76,6 @@ function pong() {
 			pos: pos, 
 			vel: vel,
 			angle: angle
-		},
-		// Give the ball a random angle to move at when a new round has started
-		randomAngle = (): number => { 
-			if (Math.random() < 0.5) {
-				if (Math.random() < 0.5) {
-					return 25
-				}
-				return 155
-			} else {
-				if (Math.random() < 0.5) {
-					return 205
-				}
-				return 335
-			}
 		}
 
 	const
@@ -103,11 +89,11 @@ function pong() {
 								(new Vec(Constants.CanvasSize - Constants.PaddleXPosition - Constants.PaddleWidth, Constants.PaddleYPosition)) 
 								(Vec.Zero) (0),
 
-		angle = randomAngle(),
 		startBall = createRectangle('ball') ('ball') 
 								   (Constants.BallSize) (Constants.BallSize) 
-								   (new Vec(Constants.CanvasSize / 2, Constants.CanvasSize / 2)) 
-								   (Vec.unitVecInDirection(angle).scale(Constants.BallVelocity)) (angle),
+								   (new Vec(Constants.CanvasSize / 2 - Constants.BallSize / 2, Constants.CanvasSize / 2- Constants.BallSize / 2)) 
+								   (Vec.unitVecInDirection(Constants.BallStartAngle).scale(Constants.BallVelocity)) (Constants.BallStartAngle),
+								// (Vec.unitVecInDirection(270).scale(Constants.BallVelocity)) (270),
 
 		initialState: State = {
 			time: 0,
@@ -116,7 +102,8 @@ function pong() {
 			ball: startBall,
 			playerScore: 0,
 			enemyScore: 0,
-			scored: false,
+			round: 1,
+			restart_at: 0,
 			gameOver: false
 		},
 		
@@ -137,42 +124,58 @@ function pong() {
 													   (a.pos.y <= b.pos.y + b.height),
 				ballCollidePlayer = bodiesCollided(s.player, s.ball),
 				ballCollideEnemy = bodiesCollided(s.ball, s.enemy),
-				ballCollideWall = s.ball.pos.y <= 3 || s.ball.pos.y + Constants.BallSize >= Constants.CanvasSize - 3,
 
-				ballReboundPaddle = (ball: Body, paddle: Body): Body => { 
+				// Provide some margin for error for the ball to rebound on the wall
+				ballCollideWall = s.ball.pos.y <= Constants.BallSize || s.ball.pos.y + Constants.BallSize >= Constants.CanvasSize - Constants.BallSize,
+
+				ballReboundPaddle = (paddle: Body): Body => { 
 					const
-						comingFromTop = s.ball.prev_pos.y < s.ball.pos.y,
-						opppositeVelocity = Vec.unitVecInDirection(180+ball.angle).scale(Constants.BallVelocity),
-						reboundVelocity = Vec.unitVecInDirection(180-ball.angle).scale(Constants.BallVelocity)
+						ballMovingDownwards = s.ball.prev_pos.y < s.ball.pos.y,
+						ballAtTopHalfOfPaddle = s.ball.pos.y + (Constants.BallSize/2) <= paddle.pos.y + (Constants.PaddleHeight/2),
+						opppositeAngle = 180+s.ball.angle,
+						reboundAngle = 360-s.ball.angle,
+						opppositeVelocity = Vec.unitVecInDirection(opppositeAngle).scale(Constants.BallVelocity),
+						reboundVelocity = Vec.unitVecInDirection(reboundAngle).scale(Constants.BallVelocity)
 
-						// Ball coming from TOP and hit TOP half of paddle: the ball moves backwards to previous direction
-						// Ball coming from TOP and hit BOTTOM half of paddle: the ball moves rebounds normally
-						// Ball coming from BOTTOM and hit TOP half of paddle: the ball moves rebounds normally
-						// Ball coming from BOTTOM and hit BOTTOM half of paddle: the ball moves backwards to previous direction
-						return ball.pos.y + (Constants.BallSize/2) <= paddle.pos.y + (Constants.PaddleHeight/2) ? 
-						<Body>{...ball, vel: comingFromTop ? opppositeVelocity : reboundVelocity, angle: comingFromTop ? 180+ball.angle : 180-ball.angle} :
-						<Body>{...ball, vel: comingFromTop ? reboundVelocity : opppositeVelocity, angle: comingFromTop ? 180-ball.angle : 180+ball.angle}},
+						// Ball moving downwards and hit TOP half of paddle: the ball moves backwards to previous direction
+						// Ball moving downwards and hit BOTTOM half of paddle: the ball moves rebounds normally
+						// Ball moving upwards and hit TOP half of paddle: the ball moves rebounds normally
+						// Ball moving upwards and hit BOTTOM half of paddle: the ball moves backwards to previous direction
+					return  ballMovingDownwards &&  ballAtTopHalfOfPaddle ? <Body> {...s.ball, 
+								prev_pos: s.ball.pos, pos: s.ball.pos.add(opppositeVelocity), vel: opppositeVelocity, angle: opppositeAngle} : 
+							ballMovingDownwards && !ballAtTopHalfOfPaddle ? <Body> {...s.ball, 
+								prev_pos: s.ball.pos, pos: s.ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: reboundAngle} : 
+							!ballMovingDownwards && ballAtTopHalfOfPaddle ? <Body> {...s.ball,
+								prev_pos: s.ball.pos, pos: s.ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: reboundAngle} :
+							<Body> {...s.ball, prev_pos: s.ball.pos, pos: s.ball.pos.add(opppositeVelocity), vel: opppositeVelocity, angle: opppositeAngle}
+				},
 
-				ballReboundWall = (ball: Body): Body => {
+				ballReboundWall = (): Body => {
 					const 
-						reboundVelocity = Vec.unitVecInDirection(180-ball.angle).scale(Constants.BallVelocity)
+						angle = 180-s.ball.angle,
+						reboundVelocity = Vec.unitVecInDirection(angle).scale(Constants.BallVelocity)
 					
-					return ball.prev_pos.x <= ball.pos.x ? <Body>{...ball, prev_pos: ball.pos, pos: ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: 180-ball.angle} :
-														   <Body>{...ball, prev_pos: ball.pos, pos: ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: 180-ball.angle}
+					return <Body>{...s.ball, prev_pos: s.ball.pos, pos: s.ball.pos.add(reboundVelocity), vel: reboundVelocity, angle: angle}
 					
 				},
 
+				determineBallVelocity = (ball: Body, paddle: Body): Body => {
+					const
+						middlePart = (p: Body, b: Body) => p.pos.y + Constants.PaddleHeight/3 > b.pos.y + (Constants.BallSize/2) && 
+																   p.pos.y + (Constants.PaddleHeight*2)/3 < b.pos.y + (Constants.BallSize/2)
+					return middlePart(ball, paddle) ? <Body> {...ball} : <Body> {...ball, vel: ball.vel.scale(1.5)}
+				},
+
 				ballRebound = (s: State): Body => 
-											{return ballCollidePlayer ? 
-												ballReboundPaddle(s.ball, s.player) :
-											ballCollideEnemy ? 
-												ballReboundPaddle(s.ball, s.enemy) :
-											ballCollideWall ? 
-												ballReboundWall(s.ball) : 
-											<Body>{...s.ball}},  // Return the ball at the same state if no collision
+					{return ballCollidePlayer ? 
+						determineBallVelocity(ballReboundPaddle(s.player), s.player) :
+					ballCollideEnemy ? 
+						determineBallVelocity(ballReboundPaddle(s.enemy), s.enemy) :
+					ballCollideWall ? 
+						ballReboundWall() : 
+					<Body>{...s.ball}},  // Return the ball at the same state if no collision
 
 			newBallState = ballRebound(s)
-			console.log(s.ball.pos)
 			return <State>{
 				...s,
 				ball: newBallState
@@ -184,30 +187,47 @@ function pong() {
 				playerScored = s.ball.pos.x > Constants.CanvasSize-10,
 				playerWon = playerScored ? s.playerScore + 1 === Constants.MaxScore : false,
 				enemyWon = enemyScored ? s.enemyScore + 1 === Constants.MaxScore : false
-			
-			// When someone scores, the ball needs to be reset in original position for new round
-			return playerScored ? <State>{...s, ball: {...startBall, vel: Vec.unitVecInDirection(randomAngle()).scale(Constants.BallVelocity)}, 
-																	 playerScore: s.playerScore + 1, gameOver: playerWon} : 
-					enemyScored ? <State>{...s, ball: {...startBall, vel: Vec.unitVecInDirection(randomAngle()).scale(Constants.BallVelocity)}, 
-																	 enemyScore: s.enemyScore + 1, gameOver: enemyWon} : 
+
+			return playerScored ? <State>{...s, ball: {...startBall, vel: Vec.Zero}, playerScore: s.playerScore + 1, round: s.round + 1, restart_at: s.time + 100, gameOver: playerWon} : 
+					enemyScored ? <State>{...s, ball: {...startBall, vel: Vec.Zero}, enemyScore: s.enemyScore + 1, round: s.round + 1, restart_at: s.time + 100, gameOver: enemyWon} : 
 								  <State>{...s}
 		},
 		handleEnemyMovement = (s: State): State => {
 			const
-				ballYVelocity = s.ball.vel.y
-			return {...s, enemy: {...s.enemy, vel: new Vec(0, ballYVelocity).scale(0.8)}}
+				ballWithinPaddle = s.ball.pos.y > s.enemy.pos.y && s.ball.pos.y < s.enemy.pos.y + Constants.PaddleHeight,
+				ballHigherThanEnemy = s.ball.pos.y < s.enemy.pos.y
+			return {...s, enemy: {...s.enemy, vel: ballWithinPaddle ? Vec.Zero :
+												   ballHigherThanEnemy ? new Vec(0, -1).scale(Constants.PaddleVelocity) : 
+																		 new Vec(0, 1).scale(Constants.PaddleVelocity)}}
 		},
+		handleBetweenRounds = (s: State): State => {
+			const 
+				pause = s.restart_at > s.time,
+				restart = s.restart_at === s.time,
+				angle = Constants.BallStartAngle + (Constants.NextBallAngle * s.round)
+			return pause ? {...s, ball: {...s.ball, vel: Vec.Zero}} : 
+				   restart ? {...s, ball: {...startBall, vel: Vec.unitVecInDirection(angle).scale(Constants.BallVelocity), angle: angle}} :
+				   {...s}
+		},
+		// handleBallSpeed = (s: State): State => {
+		// 	const
+		// 		middlePart = (paddle: Body, ball: Body) => paddle.pos.y + Constants.PaddleHeight/3 > ball.pos.y + (Constants.BallSize/2) && 
+		// 												   paddle.pos.y + (Constants.PaddleHeight*2)/3 < ball.pos.y + (Constants.BallSize/2)
+		// 	return middlePart(s.ball, s.enemy) ? <State> {...s} : <State> {...s, }
+		// },
 		tick = (s: State, elapsed: number) => {
-			return handleScoring(handleCollisions(handleEnemyMovement(
+			return handleBetweenRounds(
+					handleScoring(
+					handleCollisions(
+					handleEnemyMovement(
 				{
 					...s, 
 					time: elapsed,
 					player: moveObj(s.player),
-					// enemy: moveObj(handleEnemyMovement(s)),
 					enemy: moveObj(s.enemy),
 					ball: moveObj(s.ball)
 				}
-			)))
+			))))
 		},
 		reduceState = (s: State, e: Move | Tick): State => 
 			e instanceof Move ? {...s,
@@ -247,6 +267,7 @@ function pong() {
 		player_score.textContent = String(s.playerScore)
 		enemy_score.textContent = String(s.enemyScore)
 
+		
 		// This means either player or enemy has scored 7 points. 
 		// The observable stream will be unsubscribed and a message stating who won would be displayed
 		if (s.gameOver) {
@@ -259,6 +280,9 @@ function pong() {
 			v.setAttribute('class', "end_message")
 			s.playerScore === Constants.MaxScore ? v.textContent = "Player Won" : v.textContent = "Computer Won"
 			svg.appendChild(v)
+			const removeChild = () => {svg.removeChild(v)}
+			setTimeout(removeChild, 3000)
+			setTimeout(pong, 3000)
 		}
 	}
 }
@@ -290,7 +314,7 @@ if (typeof window != 'undefined')
 
 
 // This class was taken directly from https://tgdwyer.github.io/asteroids/.
-// This class simulates the movements of all elements in this game such as the position of the elements and the velocity. 
+// This class simulates the movements of all elements in this game such as the position of the elements and its velocity. 
 class Vec {
 	constructor(public readonly x: number = 0, public readonly y: number = 0) {}
 	add = (b:Vec) => new Vec(this.x + b.x, this.y + b.y)
@@ -307,63 +331,3 @@ class Vec {
 	static unitVecInDirection = (deg: number) => new Vec(0,-1).rotate(deg)	
 	static Zero = new Vec();
 }
-	// createBall = ():Body => {
-	// 	return {
-	// 		id: 'ball',
-	// 		viewType: 'ball',
-	// 		pos: new Vec(Constants.CanvasSize/2, Constants.CanvasSize/2), 
-	// 		vel: Vec.Zero,
-	// 		acc: Vec.Zero,
-	// 		angle: 0,
-	// 		radius: Constants.BallRadius
-	// 	}
-	// },
-	// createPaddle = (role: Role): Body => {
-	// 	return {
-	// 		id: role,
-	// 		viewType: 'paddle',
-	// 		pos: role === 'player' ? new Vec(Constants.PaddleXPosition, Constants.CanvasSize/2) : new Vec(Constants.CanvasSize - Constants.PaddleXPosition, Constants.CanvasSize/2),
-	// 		vel: Vec.Zero,
-	// 		acc: Vec.Zero,
-	// 		angle: 0,
-	// 		radius: 0
-	// 	}
-	// },
-	
-	// const 
-	// 	svg = document.getElementById("canvas"),
-	// 	player = document.getElementById("player_paddle"),
-	// 	enemy = document.getElementById("enemy_paddle"),
-	// 	keydown$ = fromEvent<KeyboardEvent>(document, 'keydown'),
-	
-	// // Function to update the y attribute of the paddle
-	// moveY = (paddle: Element, unit: number) => () => {
-	// 	const newY = Number(player.getAttribute('y')) + unit
-	// 	if (newY < Number(svg.getAttribute('height'))-30 && newY > 0) {
-	// 		paddle.setAttribute('y', String(newY))
-	// 	}
-	// }
-	// Creating observable stream to handle movement of paddle
-	// const keyObservable = function() {
-	// 	return (code: Key, f: () => void) => keydown$.pipe(
-	// 		filter(({repeat}) => !repeat),
-	// 		filter(({key}) => key === code),
-	// 		flatMap(d => interval(10).pipe(
-	// 			takeUntil(fromEvent<KeyboardEvent>(document, 'keyup').pipe(
-	// 				filter(({key})=>key === code)
-	// 			)),
-	// 			map(_=>d))
-	// 		),
-	// 		map(_=>f)
-	// 	)
-	// }(),
-
-	// Creating observable stream specific to up and down movements of paddle
-	// startUp = keyObservable('keydown', 'ArrowUp', moveY(player, -3)), 
-	// stopUp = keyObservable('keyup', 'ArrowUp', moveY(player, -3)), 
-	// startDown = keyObservable('keydown', 'ArrowDown', moveY(player, 3)),
-	// stopDown = keyObservable('keyup', 'ArrowDown', moveY(player, 3)),
-
-	// Merge the streams to be subscribed
-	// mergedKeyObservable = up.pipe(merge(down))
-	// mergedKeyObservable.subscribe(f => f())
