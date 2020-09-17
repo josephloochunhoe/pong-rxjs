@@ -1,5 +1,11 @@
-import { interval, fromEvent, from, zip } from 'rxjs'
-import { map, scan, filter, merge, flatMap, takeUntil, take, concat, timeInterval} from 'rxjs/operators'
+/*
+Name: Joseph Chun Hoe Loo
+Student ID: 30533783
+FIT2102 Assignment 1
+*/ 
+
+import { interval, fromEvent} from 'rxjs'
+import { map, scan, filter, merge} from 'rxjs/operators'
 
 const
 	Constants = new class {
@@ -11,9 +17,11 @@ const
 		readonly PaddleVelocity = 3
 		readonly BallSize = 8
 		readonly BallVelocity = 4
-		readonly BallStartAngle = 30
+		readonly BallStartAngle = 35
 		readonly NextBallAngle = 90
 		readonly MaxScore = 7
+		readonly RoundWait = 100
+		readonly GameWait = 300
 	}
 
 type Key = 'ArrowUp' | 'ArrowDown'
@@ -21,7 +29,11 @@ type Event = 'keyup' | 'keydown'
 type ViewType = 'paddle' | 'ball'
 type Role = 'player' | 'enemy' | 'ball'
 
-// This code is heavily inspired by the code from https://tgdwyer.github.io/asteroids/. 
+/* 
+This code is heavily inspired by the code from https://tgdwyer.github.io/asteroids/. 
+This function is the main starting point of this whole program which constructs the observables streams needed for user input
+and ultimately displaying the full game, after calculating the logic, to the user. 
+*/
 function pong() {
 	class Tick { constructor(public readonly elapsed: number) {} }
 	class Move { constructor(public readonly direction: number) {} }
@@ -44,7 +56,7 @@ function pong() {
 		viewType: ViewType,
 		width: number,
 		height: number,
-		prev_pos: Vec,
+		prev_pos: Vec,  // Previous position needed to later determine if the ball is moving downwards or upwards
 		pos: Vec, 
 		vel: Vec,
 		angle: number
@@ -57,8 +69,11 @@ function pong() {
 		ball: Body,
 		playerScore: number,
 		enemyScore: number,
+		playerWins: number,
+		enemyWins: number,
 		round: number,
-		restart_at: number,
+		restart_at: number,  // The time at which a new round will restart at
+		restart_game_at: number,  // The time at which a new game will restart at
 		gameOver: boolean
 	}>
 
@@ -93,7 +108,6 @@ function pong() {
 								   (Constants.BallSize) (Constants.BallSize) 
 								   (new Vec(Constants.CanvasSize / 2 - Constants.BallSize / 2, Constants.CanvasSize / 2- Constants.BallSize / 2)) 
 								   (Vec.unitVecInDirection(Constants.BallStartAngle).scale(Constants.BallVelocity)) (Constants.BallStartAngle),
-								// (Vec.unitVecInDirection(270).scale(Constants.BallVelocity)) (270),
 
 		initialState: State = {
 			time: 0,
@@ -102,8 +116,11 @@ function pong() {
 			ball: startBall,
 			playerScore: 0,
 			enemyScore: 0,
+			playerWins: 0,
+			enemyWins: 0,
 			round: 1,
-			restart_at: 0,
+			restart_at: 0,  
+			restart_game_at: 0,  
 			gameOver: false
 		},
 		
@@ -137,10 +154,10 @@ function pong() {
 						opppositeVelocity = Vec.unitVecInDirection(opppositeAngle).scale(Constants.BallVelocity),
 						reboundVelocity = Vec.unitVecInDirection(reboundAngle).scale(Constants.BallVelocity)
 
-						// Ball moving downwards and hit TOP half of paddle: the ball moves backwards to previous direction
-						// Ball moving downwards and hit BOTTOM half of paddle: the ball moves rebounds normally
-						// Ball moving upwards and hit TOP half of paddle: the ball moves rebounds normally
-						// Ball moving upwards and hit BOTTOM half of paddle: the ball moves backwards to previous direction
+						// Ball moving downwards and hit TOP half of paddle: the ball moves backwards to initial direction
+						// Ball moving downwards and hit BOTTOM half of paddle: the ball rebounds normally
+						// Ball moving upwards and hit TOP half of paddle: the ball rebounds normally
+						// Ball moving upwards and hit BOTTOM half of paddle: the ball moves backwards to initial direction
 					return  ballMovingDownwards &&  ballAtTopHalfOfPaddle ? <Body> {...s.ball, 
 								prev_pos: s.ball.pos, pos: s.ball.pos.add(opppositeVelocity), vel: opppositeVelocity, angle: opppositeAngle} : 
 							ballMovingDownwards && !ballAtTopHalfOfPaddle ? <Body> {...s.ball, 
@@ -159,22 +176,16 @@ function pong() {
 					
 				},
 
-				determineBallVelocity = (ball: Body, paddle: Body): Body => {
-					const
-						middlePart = (p: Body, b: Body) => p.pos.y + Constants.PaddleHeight/3 > b.pos.y + (Constants.BallSize/2) && 
-																   p.pos.y + (Constants.PaddleHeight*2)/3 < b.pos.y + (Constants.BallSize/2)
-					return middlePart(ball, paddle) ? <Body> {...ball} : <Body> {...ball, vel: ball.vel.scale(1.5)}
-				},
-
-				ballRebound = (s: State): Body => 
-					{return ballCollidePlayer ? 
-						determineBallVelocity(ballReboundPaddle(s.player), s.player) :
+				ballRebound = (s: State): Body => {
+					return ballCollidePlayer ? 
+						ballReboundPaddle(s.player) :
 					ballCollideEnemy ? 
-						determineBallVelocity(ballReboundPaddle(s.enemy), s.enemy) :
+						ballReboundPaddle(s.enemy) :
 					ballCollideWall ? 
-						ballReboundWall() : 
-					<Body>{...s.ball}},  // Return the ball at the same state if no collision
-
+						ballReboundWall() :
+					<Body>{...s.ball}  // Return the ball at the same state if no collision
+				},  
+			
 			newBallState = ballRebound(s)
 			return <State>{
 				...s,
@@ -183,40 +194,55 @@ function pong() {
 		},
 		handleScoring = (s: State): State => {
 			const
-				enemyScored = s.ball.pos.x < 10,
-				playerScored = s.ball.pos.x > Constants.CanvasSize-10,
+				enemyScored = s.ball.pos.x < 1,
+				playerScored = s.ball.pos.x > Constants.CanvasSize-1,
 				playerWon = playerScored ? s.playerScore + 1 === Constants.MaxScore : false,
 				enemyWon = enemyScored ? s.enemyScore + 1 === Constants.MaxScore : false
+			
+			// State object to update the winnner of the game
+			return playerWon ? <State> {...s, playerScore: s.playerScore + 1, playerWins: s.playerWins + 1, restart_game_at: s.time + Constants.GameWait, gameOver: playerWon} :
+					enemyWon ? <State> {...s, enemyScore: s.enemyScore + 1, enemyWins: s.enemyWins + 1, restart_game_at: s.time + Constants.GameWait, gameOver: enemyWon} :
 
-			return playerScored ? <State>{...s, ball: {...startBall, vel: Vec.Zero}, playerScore: s.playerScore + 1, round: s.round + 1, restart_at: s.time + 100, gameOver: playerWon} : 
-					enemyScored ? <State>{...s, ball: {...startBall, vel: Vec.Zero}, enemyScore: s.enemyScore + 1, round: s.round + 1, restart_at: s.time + 100, gameOver: enemyWon} : 
+			// State object to update the winner of the round
+					playerScored ? <State>{...s, ball: {...startBall, vel: Vec.Zero}, playerScore: s.playerScore + 1, round: s.round + 1, restart_at: s.time + Constants.RoundWait, gameOver: playerWon} : 
+					enemyScored ? <State>{...s, ball: {...startBall, vel: Vec.Zero}, enemyScore: s.enemyScore + 1, round: s.round + 1, restart_at: s.time + Constants.RoundWait, gameOver: enemyWon} : 
 								  <State>{...s}
 		},
 		handleEnemyMovement = (s: State): State => {
 			const
 				ballWithinPaddle = s.ball.pos.y > s.enemy.pos.y && s.ball.pos.y < s.enemy.pos.y + Constants.PaddleHeight,
 				ballHigherThanEnemy = s.ball.pos.y < s.enemy.pos.y
-			return {...s, enemy: {...s.enemy, vel: ballWithinPaddle ? Vec.Zero :
-												   ballHigherThanEnemy ? new Vec(0, -1).scale(Constants.PaddleVelocity) : 
-																		 new Vec(0, 1).scale(Constants.PaddleVelocity)}}
+
+			// Enemy paddle is intentionally put at 9/10 of the original speed as to make it possible for player to score
+			return {...s, enemy: {...s.enemy, vel: ballWithinPaddle ? Vec.Zero :  // Paddle doesn't need to move if ball is already within it
+												   ballHigherThanEnemy ? new Vec(0, -1).scale(Constants.PaddleVelocity*9/10) :  // Paddle will try to reach ball if ball is above/below it
+																		 new Vec(0, 1).scale(Constants.PaddleVelocity*9/10)}}
 		},
 		handleBetweenRounds = (s: State): State => {
 			const 
 				pause = s.restart_at > s.time,
 				restart = s.restart_at === s.time,
 				angle = Constants.BallStartAngle + (Constants.NextBallAngle * s.round)
-			return pause ? {...s, ball: {...s.ball, vel: Vec.Zero}} : 
+
+			// The round will be put on hold until the time reaches when it is supposed to be continue again
+			return pause ?   {...s, ball: {...s.ball, vel: Vec.Zero}} :
 				   restart ? {...s, ball: {...startBall, vel: Vec.unitVecInDirection(angle).scale(Constants.BallVelocity), angle: angle}} :
-				   {...s}
+				   			 {...s}
 		},
-		// handleBallSpeed = (s: State): State => {
-		// 	const
-		// 		middlePart = (paddle: Body, ball: Body) => paddle.pos.y + Constants.PaddleHeight/3 > ball.pos.y + (Constants.BallSize/2) && 
-		// 												   paddle.pos.y + (Constants.PaddleHeight*2)/3 < ball.pos.y + (Constants.BallSize/2)
-		// 	return middlePart(s.ball, s.enemy) ? <State> {...s} : <State> {...s, }
-		// },
+		handleBetweenGames = (s: State): State => {
+			const
+				gameEnded = s.restart_game_at > s.time,
+				restart = s.restart_game_at === s.time && s.time > 0
+			
+			// The round of the new game will be put on hold and will show final score of previous game for 3 seconds 
+			// Most values are kept except the scores, round, the ball and value indicating the game is over(gameOver)
+			return  gameEnded ? {...s, ball: {...startBall, vel: Vec.Zero}} : 
+					restart ? {...s, ball: {...startBall, vel: Vec.unitVecInDirection(Constants.BallStartAngle).scale(Constants.BallVelocity), angle: Constants.BallStartAngle}, playerScore: 0, enemyScore: 0, round: 1, gameOver: false} :
+							 {...s}
+		},
 		tick = (s: State, elapsed: number) => {
-			return handleBetweenRounds(
+			return handleBetweenGames(
+					handleBetweenRounds(
 					handleScoring(
 					handleCollisions(
 					handleEnemyMovement(
@@ -227,7 +253,7 @@ function pong() {
 					enemy: moveObj(s.enemy),
 					ball: moveObj(s.ball)
 				}
-			))))
+			)))))
 		},
 		reduceState = (s: State, e: Move | Tick): State => 
 			e instanceof Move ? {...s,
@@ -235,12 +261,14 @@ function pong() {
 			} :
 			tick(s, e.elapsed)
 		
-		const subscription = interval(10).pipe(
+		// All necessary observable streams are merged, scanned to accumulate the changes necessary, and subscribed to display the changes to the user through updateView
+		interval(10).pipe(
 			map(elapsed => new Tick(elapsed)),
 			merge(startUp, startDown, stopUp, stopDown),
 			scan(reduceState, initialState)).
 			subscribe(updateView)
-		
+	
+	// This function is essentially displaying the pong game to the user
 	function updateView(s: State) {
 		const 
 			svg = document.getElementById("canvas")!,
@@ -248,6 +276,8 @@ function pong() {
 			enemy = document.getElementById("enemy_paddle")!,
 			player_score = document.getElementById("player_score")!,
 			enemy_score = document.getElementById("enemy_score")!,
+			player_wins = document.getElementById("player_wins")!,
+			enemy_wins = document.getElementById("enemy_wins")!,
 			updateBallView = (b:Body) => {
 				const v = document.getElementById(b.id)
 				v.setAttribute('x', String(b.pos.x))
@@ -267,22 +297,23 @@ function pong() {
 		player_score.textContent = String(s.playerScore)
 		enemy_score.textContent = String(s.enemyScore)
 
+		// Update the number of wins if any player has recently won
+		player_wins.textContent = String(s.playerWins)
+		enemy_wins.textContent = String(s.enemyWins)
+
 		
 		// This means either player or enemy has scored 7 points. 
 		// The observable stream will be unsubscribed and a message stating who won would be displayed
 		if (s.gameOver) {
-			subscription.unsubscribe()
 			const v = document.createElementNS(svg.namespaceURI, "text")!
-
 			// Different x so as to align end mesaage properly as one is longer than the other
 			s.playerScore == Constants.MaxScore ? v.setAttribute('x', String(Constants.CanvasSize/4)) : v.setAttribute('x', String(Constants.CanvasSize/6))
 			v.setAttribute('y', String(Constants.CanvasSize/2))
 			v.setAttribute('class', "end_message")
 			s.playerScore === Constants.MaxScore ? v.textContent = "Player Won" : v.textContent = "Computer Won"
 			svg.appendChild(v)
-			const removeChild = () => {svg.removeChild(v)}
-			setTimeout(removeChild, 3000)
-			setTimeout(pong, 3000)
+			const removeChild = () => svg.removeChild(v)
+			setTimeout(removeChild, 100)  // Remove the end message as soon as a new game starts
 		}
 	}
 }
