@@ -20,8 +20,8 @@ const
 		readonly BallStartAngle = 35
 		readonly NextBallAngle = 90
 		readonly MaxScore = 7
-		readonly RoundWait = 100
-		readonly GameWait = 300
+		readonly RoundWait = 100  //  After scoring, the round will stop for 1 second before restarting again
+		readonly GameWait = 300  // After game is over, the game will stop for 3 seconds before restarting again
 	}
 
 type Key = 'ArrowUp' | 'ArrowDown'
@@ -124,14 +124,14 @@ function pong() {
 			gameOver: false
 		},
 		
-		moveObj = (o: Body): Body => {
+		moveBody = (b: Body): Body => {
 			const 
-				updatedPos = o.pos.add(o.vel),
-				outOfBounds = updatedPos.y <= 0 || updatedPos.y + (o.viewType === 'paddle' ? Constants.PaddleHeight : Constants.BallSize) >= Constants.CanvasSize
+				updatedPos = b.pos.add(b.vel),
+				outOfBounds = updatedPos.y <= 0 || updatedPos.y + (b.viewType === 'paddle' ? Constants.PaddleHeight : Constants.BallSize) >= Constants.CanvasSize
 		return <Body>{
-			...o,
-			prev_pos: o.pos,
-			pos: outOfBounds ? o.pos : updatedPos
+			...b,
+			prev_pos: b.pos,
+			pos: outOfBounds ? b.pos : updatedPos
 		}},
 		handleCollisions = (s: State) => {
 			const
@@ -243,15 +243,15 @@ function pong() {
 		tick = (s: State, elapsed: number) => {
 			return handleBetweenGames(
 					handleBetweenRounds(
+					handleEnemyMovement(
 					handleScoring(
 					handleCollisions(
-					handleEnemyMovement(
 				{
 					...s, 
 					time: elapsed,
-					player: moveObj(s.player),
-					enemy: moveObj(s.enemy),
-					ball: moveObj(s.ball)
+					player: moveBody(s.player),
+					enemy: moveBody(s.enemy),
+					ball: moveBody(s.ball)
 				}
 			)))))
 		},
@@ -319,7 +319,7 @@ function pong() {
 }
 
 // This function is for the 'Control' section of the game where the control buttons will be highlighted pink if a button is clicked in real time.
-// It is meant to friendly to the user so they can easily tell which button is meant for which functionality in the game
+// It is meant be friendly to the user so they can easily tell which button is meant for which functionality in the game
 function showKeys() {
 	function showKey(keyCode: Key) {
 		const 
